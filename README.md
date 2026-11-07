@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Local RAG Assistant (Windows 11)
 
 A beginner-friendly local document chatbot. It uses **Ollama** for both the chat model and embeddings, **SQLite** to store document chunks and vectors locally, and **FastAPI** to serve a local website.
@@ -115,3 +116,6 @@ Stop the Python server, close it, then delete `data\rag.sqlite3` to clear the in
 ## Privacy and safety notes
 
 The app binds to `127.0.0.1`, which is intended for access from this computer only. Do not expose it to your LAN or the public internet without adding authentication and other protections. Your source files, SQLite database, embeddings, and model inference stay local in this setup. You still need internet once to install packages and download model weights; after downloads, ordinary local use can work offline as long as the Python dependencies and models are already installed.
+=======
+# Rag-
+>>>>>>> d67e5738f43831bdd606c6ad4a45bbc1f35c6d96
