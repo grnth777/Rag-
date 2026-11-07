@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local RAG Assistant</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#111a2f; --panel2:#17223c; --border:#283654; --text:#eef3ff; --muted:#a8b4cd; --accent:#7c9cff; --good:#7ee2b8; --warn:#ffd38a; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:linear-gradient(135deg,#0b1020,#111a2f); color:var(--text); font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; min-height:100vh; }
+    .layout { max-width:1200px; margin:0 auto; padding:24px; display:grid; grid-template-columns:320px minmax(0,1fr); gap:20px; min-height:100vh; }
+    .panel { border:1px solid var(--border); border-radius:18px; background:rgba(17,26,47,.94); padding:18px; box-shadow:0 16px 40px #0002; }
+    h1 { font-size:25px; margin:0 0 4px; letter-spacing:-.5px; } h2 { font-size:17px; margin:0 0 12px; }
+    .muted { color:var(--muted); font-size:13px; } .status { padding:10px 12px; border-radius:12px; background:var(--panel2); margin:14px 0 18px; font-size:13px; }
+    .status.ok { border:1px solid #28654f; } .status.bad { border:1px solid #7b4937; }
+    .upload { display:block; border:1px dashed #52658d; border-radius:12px; padding:14px; cursor:pointer; text-align:center; margin:10px 0; }
+    input[type=file] { width:100%; margin:8px 0; color:var(--muted); font-size:12px; }
+    button { border:0; background:var(--accent); color:#081126; font-weight:700; border-radius:10px; padding:10px 13px; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:wait; } button.secondary { background:#263655; color:var(--text); border:1px solid #364969; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } .row button { flex:1; }
+    .doc-list { list-style:none; padding:0; margin:12px 0 0; display:grid; gap:8px; }
+    .doc { padding:10px; background:#0d1528; border:1px solid var(--border); border-radius:10px; overflow-wrap:anywhere; }
+    .doc strong { display:block; font-size:13px; } .doc small { color:var(--muted); }
+    .chat-panel { display:flex; flex-direction:column; min-height:calc(100vh - 48px); }
+    .top { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; border-bottom:1px solid var(--border); padding-bottom:14px; }
+    .badge { font-size:12px; padding:5px 9px; border-radius:99px; background:#202e4d; color:#cfdaff; white-space:nowrap; }
+    #messages { flex:1; overflow:auto; padding:20px 2px; display:flex; flex-direction:column; gap:14px; min-height:340px; }
+    .welcome { margin:auto; max-width:520px; text-align:center; color:var(--muted); padding:24px; } .welcome .orb { font-size:40px; margin-bottom:8px; }
+    .message { max-width:88%; padding:13px 15px; border-radius:15px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .message.user { align-self:flex-end; background:#29417a; border-bottom-right-radius:4px; }
+    .message.assistant { align-self:flex-start; background:#17233c; border:1px solid #2a3a5b; border-bottom-left-radius:4px; }
+    .sources { display:block; margin-top:10px; padding-top:8px; border-top:1px solid #334362; color:#afc2ff; font-size:12px; }
+    .composer { border-top:1px solid var(--border); padding-top:14px; }
+    textarea { width:100%; resize:vertical; min-height:70px; max-height:200px; background:#0b1325; border:1px solid #344664; color:var(--text); border-radius:12px; padding:13px; font:inherit; outline:none; }
+    textarea:focus { border-color:var(--accent); } .composer-bottom { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-top:9px; }
+    #notice { margin-top:10px; color:var(--muted); font-size:13px; min-height:20px; white-space:pre-wrap; }
+    .tiny { font-size:11px; color:var(--muted); margin-top:14px; }
+    @media (max-width:800px) { .layout { grid-template-columns:1fr; padding:12px; } .chat-panel { min-height:70vh; } .message { max-width:96%; } .top { flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="panel">
+      <h1>Local RAG</h1>
+      <div class="muted">A document assistant running on your computer.</div>
+      <div id="status" class="status">Checking local Ollama…</div>
+
+      <h2>Your knowledge base</h2>
+      <div class="muted">Upload PDFs with selectable text, TXT, Markdown, or DOCX files. Files and vectors stay in this project folder.</div>
+      <form id="uploadForm">
+        <label class="upload" for="fileInput">＋ Choose a document</label>
+        <input id="fileInput" type="file" accept=".pdf,.txt,.md,.docx" required>
+        <button id="uploadBtn" type="submit" style="width:100%">Upload & index</button>
+      </form>
+      <div class="row" style="margin-top:8px">
+        <button id="reindexBtn" class="secondary" type="button">Re-index all</button>
+        <button id="refreshBtn" class="secondary" type="button">Refresh</button>
+      </div>
+      <div id="notice" role="status"></div>
+      <ul id="documents" class="doc-list"></ul>
+      <div class="tiny">Local-only starter: the app binds to 127.0.0.1 and calls Ollama at 127.0.0.1:11434. It does not use hosted AI APIs.</div>
+    </aside>
+
+    <main class="panel chat-panel">
+      <div class="top">
+        <div><h2 style="font-size:20px;margin-bottom:4px">Chat with your documents</h2><div class="muted">Answers are grounded in passages retrieved from your indexed files.</div></div>
+        <span class="badge">LOCAL MODEL · NO API KEY</span>
+      </div>
+      <div id="messages" aria-live="polite">
+        <div class="welcome"><div class="orb">⌘</div><strong>Your private knowledge assistant</strong><p>Upload your notes, then ask questions like “Summarize chapter 2” or “What does my document say about APIs?”</p></div>
+      </div>
+      <form id="chatForm" class="composer">
+        <textarea id="question" placeholder="Ask a question about your documents…" required></textarea>
+        <div class="composer-bottom"><span class="muted">Enter to send · Shift+Enter for a new line</span><button id="sendBtn" type="submit">Ask local AI ↗</button></div>
+      </form>
+    </main>
+  </div>
+<script>
+  const messagesEl = document.getElementById('messages');
+  const statusEl = document.getElementById('status');
+  const noticeEl = document.getElementById('notice');
+  const documentsEl = document.getElementById('documents');
+  const history = [];
+
+  function setNotice(text) { noticeEl.textContent = text || ''; }
+  function addMessage(role, text, sources = []) {
+    const welcome = messagesEl.querySelector('.welcome');
+    if (welcome) welcome.remove();
+    const el = document.createElement('div');
+    el.className = `message ${role}`;
+    // textContent prevents document contents or model output from becoming executable HTML.
+    el.textContent = text;
+    if (sources.length) {
+      const sourceEl = document.createElement('span');
+      sourceEl.className = 'sources';
+      sourceEl.textContent = 'Retrieved sources: ' + sources.map(s => `${s.name} (score ${s.score})`).join(' · ');
+      el.appendChild(sourceEl);
+    }
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  async function refreshStatus() {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      if (data.ollama_connected && data.chat_model_installed && data.embedding_model_installed) {
+        statusEl.className = 'status ok';
+        statusEl.textContent = `● Ollama connected\nChat: ${data.chat_model}\nEmbeddings: ${data.embedding_model}\n${data.document_count} document(s) · ${data.chunk_count} chunks`;
+      } else {
+        statusEl.className = 'status bad';
+        const missing = [];
+        if (!data.ollama_connected) missing.push('Ollama is not responding. Open Ollama first.');
+        if (!data.chat_model_installed) missing.push(`Missing chat model: ${data.chat_model}`);
+        if (!data.embedding_model_installed) missing.push(`Missing embedding model: ${data.embedding_model}`);
+        statusEl.textContent = missing.join('\n') || data.error || 'Check Ollama setup.';
+      }
+      renderDocuments(data.documents || []);
+    } catch (err) {
+      statusEl.className = 'status bad';
+      statusEl.textContent = 'Could not reach the local app API. Is the Python server running?';
+    }
+  }
+
+  function renderDocuments(docs) {
+    documentsEl.replaceChildren();
+    if (!docs.length) {
+      const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'No indexed documents yet.'; documentsEl.appendChild(li); return;
+    }
+    docs.forEach(doc => {
+      const li = document.createElement('li'); li.className = 'doc';
+      const name = document.createElement('strong'); name.textContent = doc.source;
+      const meta = document.createElement('small'); meta.textContent = `${doc.chunks} chunks`;
+      const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove'; remove.className = 'secondary'; remove.style.marginTop = '8px'; remove.style.padding = '5px 8px';
+      remove.addEventListener('click', async () => {
+        if (!confirm(`Remove ${doc.source} from this local knowledge base?`)) return;
+        try {
+          const r = await fetch('/api/documents/' + encodeURIComponent(doc.source), { method: 'DELETE' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.detail || 'Remove failed');
+          renderDocuments(d.documents || []); await refreshStatus(); setNotice(`Removed ${doc.source}`);
+        } catch (e) { setNotice(e.message); }
+      });
+      li.append(name, meta, document.createElement('br'), remove); documentsEl.appendChild(li);
+    });
+  }
+
+  document.getElementById('uploadForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = document.getElementById('fileInput');
+    if (!input.files.length) return;
+    const form = new FormData(); form.append('file', input.files[0]);
+    const btn = document.getElementById('uploadBtn'); btn.disabled = true; btn.textContent = 'Indexing…';
+    setNotice('Reading document and creating local embeddings. Large files can take a little while.');
+    try {
+      const response = await fetch('/api/upload', { method: 'POST', body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Upload failed');
+      setNotice(`Indexed ${data.source}: ${data.chunks} chunk(s).`); input.value = ''; await refreshStatus();
+    } catch (err) { setNotice('Error: ' + err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Upload & index'; }
+  });
+
+  document.getElementById('reindexBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('reindexBtn'); btn.disabled = true; setNotice('Re-indexing files in data/documents…');
+    try {
+      const response = await fetch('/api/reindex', { method: 'POST' }); const data = await response.json();
+      const failed = (data.failures || []).length;
+      setNotice(`Indexed ${data.indexed.length} file(s).${failed ? ` ${failed} file(s) failed: ` + data.failures.map(x => `${x.source}: ${x.error}`).join(' | ') : ''}`);
+      await refreshStatus();
+    } catch (err) { setNotice(err.message); }
+    finally { btn.disabled = false; }
+  });
+  document.getElementById('refreshBtn').addEventListener('click', refreshStatus);
+
+  document.getElementById('chatForm').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = document.getElementById('question'); const question = input.value.trim(); if (!question) return;
+    input.value = ''; addMessage('user', question);
+    const btn = document.getElementById('sendBtn'); btn.disabled = true; btn.textContent = 'Thinking…';
+    const pending = document.createElement('div'); pending.className = 'message assistant'; pending.textContent = 'Searching your local documents and asking Ollama…'; messagesEl.appendChild(pending); messagesEl.scrollTop = messagesEl.scrollHeight;
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, history: history.slice(-6) })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Chat failed');
+      pending.remove(); addMessage('assistant', data.answer || '(No answer)', data.sources || []);
+      history.push({ role: 'user', content: question }, { role: 'assistant', content: data.answer || '' });
+    } catch (err) { pending.remove(); addMessage('assistant', 'Error: ' + err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Ask local AI ↗'; input.focus(); }
+  });
+  document.getElementById('question').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); document.getElementById('chatForm').requestSubmit(); }
+  });
+  refreshStatus();
+</script>
+</body>
+</html>
